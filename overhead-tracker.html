@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Overhead — Flight Tracker</title>
+<link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#000;
+    --led-white:#f2f4ff;
+    --led-blue:#2e6cff;
+    --led-mint:#8affd8;
+    --led-amber:#ffc857;
+    --dot-pitch:3.5px;   /* LED grid spacing (fine) */
+    --dot-hole:1.35px;   /* visible dot radius */
+  }
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{height:100%;}
+  body{
+    background:var(--bg);
+    font-family:'VT323', monospace;
+    color:var(--led-white);
+    overflow:hidden;
+    cursor:default;
+  }
+
+  /* ---------- LED panel ---------- */
+  #panel{
+    position:fixed; inset:0;
+    display:flex; flex-direction:column;
+    justify-content:center;
+    padding:4vmin 3vmin;
+    gap:2.5vmin;
+  }
+  .row-top{
+    display:flex; align-items:stretch; gap:3.5vmin;
+  }
+  #logo{
+    flex:0 0 auto;
+    width:22vmin; height:22vmin;
+    display:flex; align-items:center; justify-content:center;
+  }
+  #logo svg{width:100%;height:100%;}
+  #headlines{
+    display:flex; flex-direction:column; justify-content:space-between;
+    line-height:1;
+  }
+  .h-line{
+    font-size:8.2vmin;
+    letter-spacing:0.06em;
+    color:var(--led-white);
+    text-shadow:0 0 1vmin rgba(220,230,255,.45);
+    white-space:nowrap;
+  }
+  .d-line{
+    font-size:7.4vmin;
+    line-height:1.12;
+    letter-spacing:0.04em;
+    color:var(--led-mint);
+    text-shadow:0 0 1vmin rgba(120,255,210,.4);
+    white-space:nowrap;
+  }
+  .status{
+    color:var(--led-amber);
+    text-shadow:0 0 1vmin rgba(255,200,90,.4);
+  }
+  #footer{
+    position:fixed; left:3vmin; bottom:1.4vmin;
+    font-size:3.4vmin; letter-spacing:.08em;
+    color:#4a536e;
+    text-shadow:none;
+  }
+
+  /* ---------- LED dot mask ---------- */
+  #ledmask{
+    position:fixed; inset:0; pointer-events:none; z-index:50;
+    background-image:radial-gradient(circle at center,
+      transparent 0, transparent var(--dot-hole), #000 calc(var(--dot-hole) + .5px));
+    background-size:var(--dot-pitch) var(--dot-pitch);
+  }
+  body.led-off #ledmask{display:none;}
+  #sheen{
+    position:fixed; inset:0; pointer-events:none; z-index:51;
+    background:radial-gradient(120% 90% at 50% 0%, rgba(255,255,255,.04), transparent 55%);
+  }
+
+  /* ---------- settings sheet ---------- */
+  #sheet{
+    position:fixed; inset:auto 0 0 0; z-index:100;
+    background:#0b0e16; border-top:1px solid #23283a;
+    padding:20px 22px 30px; transform:translateY(105%);
+    transition:transform .25s ease;
+    font-size:22px; color:#cfd6ea;
+    max-height:85vh; overflow-y:auto;
+  }
+  #sheet.open{transform:translateY(0);}
+  #sheet h2{font-size:26px; letter-spacing:.06em; margin-bottom:14px; color:#fff;}
+  .field{display:flex; align-items:center; gap:12px; margin:12px 0; flex-wrap:wrap;}
+  .field label{min-width:130px; color:#8f98b4;}
+  input[type=range]{flex:1; min-width:140px;}
+  input[type=text]{
+    background:#141827;border:1px solid #2a3049;color:#fff;
+    font-family:inherit;font-size:20px;padding:6px 10px;border-radius:6px;width:220px;
+  }
+  button{
+    font-family:inherit;font-size:20px;letter-spacing:.05em;
+    background:#1b2340;color:#fff;border:1px solid #34406b;
+    padding:8px 16px;border-radius:8px;
+  }
+  button:active{background:#2a3560;}
+  button.sel{background:#34549e;border-color:#5b7cd6;}
+  .btnrow{display:flex;gap:10px;margin-top:16px;flex-wrap:wrap;}
+  #radiusVal{color:#fff;min-width:70px;}
+  #diag{
+    margin-top:14px; padding:10px 12px; border:1px solid #23283a; border-radius:8px;
+    font-size:18px; line-height:1.5; color:#8f98b4; white-space:pre-line;
+  }
+  @media (prefers-reduced-motion: reduce){ #sheet{transition:none;} }
+</style>
+</head>
+<body>
+
+<div id="panel">
+  <div class="row-top">
+    <div id="logo">
+      <svg viewBox="0 0 13 13" shape-rendering="crispEdges" aria-hidden="true">
+        <g fill="#2e6cff">
+          <rect x="6" y="0" width="1" height="1"/>
+          <rect x="6" y="1" width="1" height="1"/>
+          <rect x="5" y="2" width="3" height="1"/>
+          <rect x="5" y="3" width="3" height="1"/>
+          <rect x="4" y="4" width="5" height="1"/>
+          <rect x="2" y="5" width="9" height="1"/>
+          <rect x="0" y="6" width="13" height="1"/>
+          <rect x="0" y="7" width="13" height="1"/>
+          <rect x="5" y="8" width="3" height="1"/>
+          <rect x="5" y="9" width="3" height="1"/>
+          <rect x="4" y="10" width="5" height="1"/>
+          <rect x="3" y="11" width="7" height="1"/>
+          <rect x="5" y="12" width="3" height="1"/>
+        </g>
+      </svg>
+    </div>
+    <div id="headlines">
+      <div class="h-line" id="line1">Overhead</div>
+      <div class="h-line" id="line2">·········</div>
+      <div class="h-line" id="line3">·········</div>
+    </div>
+  </div>
+  <div class="d-line" id="line4">Waiting for location…</div>
+  <div class="d-line" id="line5">Tap screen for settings</div>
+</div>
+
+<div id="ledmask"></div>
+<div id="sheen"></div>
+<div id="footer"></div>
+
+<div id="sheet">
+  <h2>SETTINGS</h2>
+  <div class="field">
+    <label>Search radius</label>
+    <input type="range" id="radius" min="5" max="100" step="5" value="30">
+    <span id="radiusVal">30 nm</span>
+  </div>
+  <div class="field">
+    <label>Location</label>
+    <input type="text" id="latlon" placeholder="lat, lon (optional)">
+    <button id="useGps">Use GPS</button>
+  </div>
+  <div class="field">
+    <label>LED density</label>
+    <button data-led="fine" class="ledBtn sel">Fine</button>
+    <button data-led="medium" class="ledBtn">Medium</button>
+    <button data-led="coarse" class="ledBtn">Coarse</button>
+    <button data-led="off" class="ledBtn">Off</button>
+  </div>
+  <div class="btnrow">
+    <button id="refreshBtn">Refresh now</button>
+    <button id="fsBtn">Fullscreen</button>
+    <button id="closeBtn">Close</button>
+  </div>
+  <div id="diag">No data yet.</div>
+</div>
+
+<script>
+"use strict";
+
+/* ================= config / state ================= */
+const state = {
+  lat:null, lon:null,
+  radius:30,            // nautical miles
+  aircraft:[],
+  shown:0,
+  routeCache:{},
+  airportCache:{},
+  diag:{},              // per-source status
+  paused:false
+};
+
+const $ = id => document.getElementById(id);
+const L = [null,$("line1"),$("line2"),$("line3"),$("line4"),$("line5")];
+
+/* persistent settings (guarded — degrades gracefully if storage is unavailable) */
+function saveSetting(k,v){ try{ localStorage.setItem("oh_"+k, JSON.stringify(v)); }catch(e){} }
+function loadSetting(k){ try{ const v=localStorage.getItem("oh_"+k); return v==null?null:JSON.parse(v); }catch(e){ return null; } }
+
+/* ================= airline names (ICAO callsign prefixes) ================= */
+const AIRLINES = {
+  UAL:"United", AAL:"American", DAL:"Delta", SWA:"Southwest", JBU:"JetBlue",
+  ASA:"Alaska", NKS:"Spirit", FFT:"Frontier", AAY:"Allegiant", SCX:"Sun Country",
+  HAL:"Hawaiian", SKW:"SkyWest", RPA:"Republic", EDV:"Endeavor", ENY:"Envoy",
+  JIA:"PSA", PDT:"Piedmont", AWI:"Air Wisconsin", QXE:"Horizon", GJS:"GoJet",
+  UPS:"UPS", FDX:"FedEx", GTI:"Atlas Air", CKS:"Kalitta", ABX:"ABX Air",
+  ATN:"Air Transport", AJT:"Amerijet", CLX:"Cargolux", BOX:"AeroLogic",
+  ACA:"Air Canada", WJA:"WestJet", JZA:"Jazz", POE:"Porter", ROU:"Air Canada Rouge",
+  BAW:"British Airways", VIR:"Virgin Atlantic", DLH:"Lufthansa", AFR:"Air France",
+  KLM:"KLM", IBE:"Iberia", EIN:"Aer Lingus", SAS:"SAS", SWR:"Swiss",
+  AUA:"Austrian", TAP:"TAP Portugal", ITY:"ITA Airways", FIN:"Finnair",
+  LOT:"LOT Polish", ICE:"Icelandair", RYR:"Ryanair", EZY:"easyJet", WZZ:"Wizz Air",
+  UAE:"Emirates", QTR:"Qatar", ETD:"Etihad", ELY:"El Al", THY:"Turkish",
+  ANA:"ANA", JAL:"Japan Airlines", KAL:"Korean Air", AAR:"Asiana",
+  CPA:"Cathay Pacific", SIA:"Singapore", EVA:"EVA Air", CAL:"China Airlines",
+  QFA:"Qantas", ANZ:"Air New Zealand", FJI:"Fiji Airways",
+  AMX:"Aeromexico", VOI:"Volaris", CMP:"Copa", AVA:"Avianca", LAN:"LATAM",
+  EJA:"NetJets", LXJ:"Flexjet", JTL:"Jet Linx", XOJ:"XOJet", VTE:"Vista",
+  DPJ:"Wheels Up", KAP:"Cape Air", MXY:"Breeze", VXP:"Avelo", JSX:"JSX"
+};
+
+/* ================= aircraft type names ================= */
+const TYPES = {
+  A19N:"A319neo", A20N:"A320neo", A21N:"A321neo",
+  A319:"A319", A320:"A320", A321:"A321",
+  A332:"A330-200", A333:"A330-300", A338:"A330-800", A339:"A330-900",
+  A343:"A340", A346:"A340-600", A359:"A350-900", A35K:"A350-1000",
+  A388:"A380", A306:"A300", A310:"A310",
+  B712:"717", B722:"727", B732:"737-200", B733:"737-300", B734:"737-400",
+  B735:"737-500", B736:"737-600", B737:"737-700", B738:"737-800", B739:"737-900",
+  B37M:"737 MAX 7", B38M:"737 MAX 8", B39M:"737 MAX 9", B3XM:"737 MAX 10",
+  B741:"747-100", B742:"747-200", B744:"747-400", B748:"747-8",
+  B752:"757-200", B753:"757-300", B762:"767-200", B763:"767-300", B764:"767-400",
+  B772:"777-200", B77L:"777-200LR", B773:"777-300", B77W:"777-300ER",
+  B788:"787-8", B789:"787-9", B78X:"787-10",
+  MD11:"MD-11", MD82:"MD-82", MD83:"MD-83", MD88:"MD-88", MD90:"MD-90",
+  E135:"ERJ-135", E145:"ERJ-145", E170:"E170", E75S:"E175", E75L:"E175",
+  E190:"E190", E195:"E195", E290:"E190-E2", E295:"E195-E2",
+  CRJ2:"CRJ-200", CRJ7:"CRJ-700", CRJ9:"CRJ-900", CRJX:"CRJ-1000",
+  DH8A:"Dash 8-100", DH8B:"Dash 8-200", DH8C:"Dash 8-300", DH8D:"Dash 8-Q400",
+  AT45:"ATR 42", AT72:"ATR 72", SF34:"Saab 340",
+  C172:"Cessna 172", C182:"Cessna 182", C208:"Caravan", C25A:"Citation CJ2",
+  C25B:"Citation CJ3", C56X:"Citation XLS", C680:"Citation Sovereign",
+  C68A:"Citation Latitude", C700:"Citation Longitude", C750:"Citation X",
+  E50P:"Phenom 100", E55P:"Phenom 300", E545:"Legacy 450", E550:"Legacy 500",
+  CL30:"Challenger 300", CL35:"Challenger 350", CL60:"Challenger 600",
+  GLF4:"Gulfstream IV", GLF5:"Gulfstream V", GLF6:"G650", GL7T:"Global 7500",
+  GLEX:"Global Express", LJ35:"Learjet 35", LJ45:"Learjet 45", LJ60:"Learjet 60",
+  PC12:"Pilatus PC-12", TBM9:"TBM 900", SR22:"Cirrus SR22", DA40:"Diamond DA40",
+  P28A:"Piper Cherokee", BE20:"King Air 200", BE35:"Bonanza", B350:"King Air 350",
+  H60:"Black Hawk", EC35:"EC135", A139:"AW139", R44:"Robinson R44",
+  K35R:"KC-135", C17:"C-17", C130:"C-130", B52:"B-52"
+};
+
+/* ================= helpers ================= */
+function airlineName(cs){
+  if(!cs) return null;
+  const p = cs.trim().slice(0,3).toUpperCase();
+  return AIRLINES[p] || null;
+}
+function typeName(t){
+  if(!t) return null;
+  return TYPES[t.toUpperCase()] || t.toUpperCase();
+}
+function fmtAlt(ft){
+  if(ft==="ground") return "GND";
+  if(ft==null) return "--";
+  if(ft < 1000) return ft+"";
+  return (ft/1000).toFixed(1).replace(/\.0$/,"")+"k";
+}
+function setLine(i, txt, cls){
+  const el = L[i];
+  el.textContent = txt;
+  el.classList.toggle("status", cls==="status");
+}
+function nmBetween(lat1,lon1,lat2,lon2){
+  const R=3440.065, toR=Math.PI/180;
+  const dLat=(lat2-lat1)*toR, dLon=(lon2-lon1)*toR;
+  const a=Math.sin(dLat/2)**2+Math.cos(lat1*toR)*Math.cos(lat2*toR)*Math.sin(dLon/2)**2;
+  return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+}
+
+/* ================= data fetch ================= */
+async function fetchJSON(url, ms=8000){
+  const c = new AbortController();
+  const t = setTimeout(()=>c.abort(), ms);
+  try{
+    const r = await fetch(url, {signal:c.signal});
+    if(!r.ok) throw new Error("HTTP "+r.status);
+    return await r.json();
+  } finally { clearTimeout(t); }
+}
+
+const SOURCES = [
+  { name:"adsb.lol",
+    url:(la,lo,r)=>`https://api.adsb.lol/v2/point/${la}/${lo}/${r}` },
+  { name:"airplanes.live",
+    url:(la,lo,r)=>`https://api.airplanes.live/v2/point/${la}/${lo}/${r}` },
+  { name:"adsb.fi",
+    url:(la,lo,r)=>`https://opendata.adsb.fi/api/v2/lat/${la}/lon/${lo}/dist/${r}` }
+];
+
+async function fetchAircraft(){
+  if(state.lat==null) return;
+  const {lat, lon, radius} = state;
+
+  const results = await Promise.allSettled(
+    SOURCES.map(s => fetchJSON(s.url(lat,lon,radius)))
+  );
+
+  const byHex = {};
+  results.forEach((res,i)=>{
+    const name = SOURCES[i].name;
+    if(res.status==="fulfilled"){
+      const list = res.value && (res.value.ac || res.value.aircraft) || [];
+      state.diag[name] = `OK — ${list.length} aircraft`;
+      for(const a of list){
+        if(!a.hex) continue;
+        if(!byHex[a.hex]) byHex[a.hex]=a;
+      }
+    } else {
+      state.diag[name] = "FAILED — " + (res.reason && res.reason.message || res.reason);
+    }
+  });
+
+  const ac = Object.values(byHex)
+    .filter(a => a.alt_baro !== "ground")
+    .map(a => {
+      if(a.dst==null && a.lat!=null && a.lon!=null)
+        a.dst = nmBetween(lat,lon,a.lat,a.lon);
+      return a;
+    })
+    .sort((a,b) => (a.dst??999)-(b.dst??999));
+
+  // keep showing the same aircraft across refreshes if it's still in range
+  const curHex = state.aircraft[state.shown] && state.aircraft[state.shown].hex;
+  state.aircraft = ac;
+  const keep = curHex ? ac.findIndex(x=>x.hex===curHex) : -1;
+  state.shown = keep >= 0 ? keep : 0;
+  updateDiag();
+}
+
+function updateDiag(){
+  const lines = [];
+  lines.push(`Position: ${state.lat!=null ? state.lat+", "+state.lon : "not set"}`);
+  lines.push(`Radius: ${state.radius} nm (${Math.round(state.radius*1.15)} mi)`);
+  for(const [k,v] of Object.entries(state.diag)) lines.push(`${k}: ${v}`);
+  lines.push(`Merged: ${state.aircraft.length} airborne`);
+  $("diag").textContent = lines.join("\n");
+}
+
+/* route lookup */
+async function getRoute(cs){
+  const key = cs.trim();
+  if(key in state.routeCache) return state.routeCache[key];
+  state.routeCache[key] = null;
+  try{
+    const r = await fetchJSON(`https://hexdb.io/api/v1/route/icao/${key}`, 6000);
+    if(r && r.route && r.route.includes("-")){
+      const legs = r.route.split("-");
+      const iata = await Promise.all(legs.map(icaoToIata));
+      state.routeCache[key] = iata.join("-");
+    }
+  }catch(e){}
+  return state.routeCache[key];
+}
+async function icaoToIata(icao){
+  if(state.airportCache[icao]) return state.airportCache[icao];
+  try{
+    const a = await fetchJSON(`https://hexdb.io/api/v1/airport/icao/${icao}`, 6000);
+    if(a && a.iata){ state.airportCache[icao]=a.iata; return a.iata; }
+  }catch(e){}
+  state.airportCache[icao]=icao;
+  return icao;
+}
+
+/* ================= render ================= */
+function render(){
+  const ac = state.aircraft;
+  if(state.lat==null){
+    setLine(1,"Overhead");
+    setLine(4,"Waiting for location…","status");
+    setLine(5,"Tap screen for settings","status");
+    return;
+  }
+  if(!ac.length){
+    setLine(1,"Scanning");
+    setLine(2,"·········");
+    setLine(3,"·········");
+    setLine(4,`No traffic within ${state.radius}nm`,"status");
+    setLine(5,new Date().toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"}),"status");
+    $("footer").textContent = `${state.lat}, ${state.lon}`;
+    return;
+  }
+  const a = ac[state.shown % ac.length];
+  const cs = (a.flight||"").trim();
+
+  setLine(1, airlineName(cs) || cs || a.r || (a.hex||"").toUpperCase());
+
+  setLine(2, "···-···");
+  if(cs){
+    getRoute(cs).then(rt=>{
+      const cur = state.aircraft[state.shown % state.aircraft.length];
+      if(cur && (cur.flight||"").trim()===cs)
+        setLine(2, rt || cs);
+    });
+  } else {
+    setLine(2, a.r || "-------");
+  }
+
+  setLine(3, typeName(a.t) || "Unknown");
+
+  const alt  = fmtAlt(a.alt_baro!=null ? a.alt_baro : a.alt_geom);
+  const mph  = a.gs!=null ? Math.round(a.gs*1.15078) : "--";
+  const trk  = a.track!=null ? Math.round(a.track) : "--";
+  const vrRaw = a.baro_rate!=null ? a.baro_rate : a.geom_rate;
+  const vr   = vrRaw!=null ? Math.round(vrRaw/60) : 0;
+  setLine(4, `Alt:${alt}ft,Spd:${mph}mph`);
+  setLine(5, `Trk:${trk}deg,Vr:${vr>0?"+":""}${vr}ft/s`);
+
+  const dst = a.dst!=null ? a.dst.toFixed(1)+"nm away" : "";
+  $("footer").textContent = `${(state.shown % ac.length)+1}/${ac.length}  ${cs || (a.hex||"").toUpperCase()}  ${dst}`;
+}
+
+/* ================= loops ================= */
+setInterval(async ()=>{ if(!state.paused){ await fetchAircraft(); render(); } }, 15000);
+setInterval(()=>{
+  if(state.aircraft.length>1 && !state.paused){
+    state.shown = (state.shown+1) % state.aircraft.length;
+    render();
+  }
+}, 8000);
+
+/* ================= location ================= */
+function useGPS(){
+  if(!navigator.geolocation){ setLine(4,"No GPS — enter lat,lon","status"); return; }
+  setLine(4,"Acquiring GPS…","status");
+  navigator.geolocation.getCurrentPosition(async pos=>{
+    state.lat = +pos.coords.latitude.toFixed(4);
+    state.lon = +pos.coords.longitude.toFixed(4);
+    saveSetting("lat", state.lat); saveSetting("lon", state.lon);
+    $("latlon").value = `${state.lat}, ${state.lon}`;
+    await fetchAircraft(); render();
+  }, err=>{
+    // Browsers block geolocation for pages opened as local files (file://) —
+    // it only works over https. Saved coordinates cover this case.
+    if(state.lat!=null) return; // already running on saved coords, stay quiet
+    const local = location.protocol === "file:";
+    setLine(4, local ? "GPS blocked for local files" : "Location unavailable ("+err.code+")","status");
+    setLine(5,"Enter lat,lon once — it's remembered","status");
+    updateDiag();
+  }, {enableHighAccuracy:false, timeout:10000, maximumAge:600000});
+}
+
+/* ================= settings UI ================= */
+const sheet = $("sheet");
+$("panel").addEventListener("click", ()=>{ updateDiag(); sheet.classList.add("open"); });
+$("closeBtn").addEventListener("click", e=>{ e.stopPropagation(); sheet.classList.remove("open"); });
+$("useGps").addEventListener("click", e=>{ e.stopPropagation(); useGPS(); });
+$("refreshBtn").addEventListener("click", async e=>{
+  e.stopPropagation();
+  await fetchAircraft(); render(); updateDiag();
+});
+$("radius").addEventListener("input", async e=>{
+  state.radius = +e.target.value;
+  $("radiusVal").textContent = state.radius+" nm";
+});
+$("radius").addEventListener("change", async ()=>{
+  saveSetting("radius", state.radius);
+  await fetchAircraft(); render();
+});
+$("latlon").addEventListener("change", async e=>{
+  const m = e.target.value.match(/(-?\d+(\.\d+)?)[,\s]+(-?\d+(\.\d+)?)/);
+  if(m){
+    state.lat=+m[1]; state.lon=+m[3];
+    saveSetting("lat", state.lat); saveSetting("lon", state.lon);
+    await fetchAircraft(); render();
+  }
+});
+$("fsBtn").addEventListener("click", e=>{
+  e.stopPropagation();
+  if(!document.fullscreenElement) document.documentElement.requestFullscreen().catch(()=>{});
+  else document.exitFullscreen();
+});
+/* LED density buttons */
+const LED = {
+  fine:   ["3.5px","1.35px"],
+  medium: ["5px","1.9px"],
+  coarse: ["7px","2.6px"],
+  off:    null
+};
+document.querySelectorAll(".ledBtn").forEach(b=>{
+  b.addEventListener("click", e=>{
+    e.stopPropagation();
+    document.querySelectorAll(".ledBtn").forEach(x=>x.classList.remove("sel"));
+    b.classList.add("sel");
+    const v = LED[b.dataset.led];
+    document.body.classList.toggle("led-off", !v);
+    if(v){
+      document.documentElement.style.setProperty("--dot-pitch", v[0]);
+      document.documentElement.style.setProperty("--dot-hole", v[1]);
+    }
+  });
+});
+
+/* keep tablet screen awake */
+let wakeLock=null;
+async function keepAwake(){
+  try{ if("wakeLock" in navigator) wakeLock = await navigator.wakeLock.request("screen"); }catch(e){}
+}
+document.addEventListener("visibilitychange", ()=>{ if(document.visibilityState==="visible") keepAwake(); });
+
+/* ================= boot ================= */
+keepAwake();
+const savedLat = loadSetting("lat"), savedLon = loadSetting("lon"), savedR = loadSetting("radius");
+if(savedR){ state.radius = savedR; $("radius").value = savedR; $("radiusVal").textContent = savedR+" nm"; }
+if(savedLat!=null && savedLon!=null){
+  state.lat = savedLat; state.lon = savedLon;
+  $("latlon").value = `${savedLat}, ${savedLon}`;
+  fetchAircraft().then(render);
+}
+useGPS();   // will silently refine the saved position if the browser allows it
+render();
+</script>
+</body>
+</html>
