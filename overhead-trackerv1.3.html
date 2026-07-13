@@ -1,0 +1,778 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Overhead — Flight Tracker</title>
+<link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#000;
+    --led-white:#f2f4ff;
+    --led-blue:#2e6cff;
+    --led-mint:#8affd8;
+    --led-amber:#ffc857;
+    --dot-pitch:3.5px;   /* LED grid spacing (fine) */
+    --dot-hole:1.35px;   /* visible dot radius */
+  }
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{height:100%;}
+  body{
+    background:var(--bg);
+    font-family:'VT323', monospace;
+    color:var(--led-white);
+    overflow:hidden;
+    cursor:default;
+  }
+
+  /* ---------- LED panel ---------- */
+  #panel{
+    position:fixed; inset:0;
+    display:flex; flex-direction:column;
+    justify-content:center;
+    padding:4vmin 3vmin;
+    gap:2.5vmin;
+  }
+  .row-top{
+    display:flex; align-items:stretch; gap:3.5vmin;
+  }
+  #logo{
+    flex:0 0 auto;
+    width:22vmin; height:22vmin;
+    display:flex; align-items:center; justify-content:center;
+  }
+  #logo svg{width:100%;height:100%;}
+  #headlines{
+    display:flex; flex-direction:column; justify-content:space-between;
+    line-height:1;
+  }
+  .h-line{
+    font-size:7.2vmin;
+    letter-spacing:0.06em;
+    color:var(--led-white);
+    text-shadow:0 0 1vmin rgba(220,230,255,.45);
+    white-space:nowrap;
+  }
+  .d-line{
+    font-size:7.4vmin;
+    line-height:1.12;
+    letter-spacing:0.04em;
+    color:var(--led-mint);
+    text-shadow:0 0 1vmin rgba(120,255,210,.4);
+    white-space:nowrap;
+  }
+  .status{
+    color:var(--led-amber);
+    text-shadow:0 0 1vmin rgba(255,200,90,.4);
+  }
+  #footer{
+    position:fixed; left:3vmin; bottom:1.4vmin;
+    font-size:3.4vmin; letter-spacing:.08em;
+    color:#4a536e;
+    text-shadow:none;
+  }
+
+  /* ---------- LED dot mask ---------- */
+  #ledmask{
+    position:fixed; inset:0; pointer-events:none; z-index:50;
+    background-image:radial-gradient(circle at center,
+      transparent 0, transparent var(--dot-hole), #000 calc(var(--dot-hole) + .5px));
+    background-size:var(--dot-pitch) var(--dot-pitch);
+  }
+  body.led-off #ledmask{display:none;}
+  #sheen{
+    position:fixed; inset:0; pointer-events:none; z-index:51;
+    background:radial-gradient(120% 90% at 50% 0%, rgba(255,255,255,.04), transparent 55%);
+  }
+
+  /* ---------- settings sheet ---------- */
+  #sheet{
+    position:fixed; inset:auto 0 0 0; z-index:100;
+    background:#0b0e16; border-top:1px solid #23283a;
+    padding:20px 22px 30px; transform:translateY(105%);
+    transition:transform .25s ease;
+    font-size:22px; color:#cfd6ea;
+    max-height:85vh; overflow-y:auto;
+  }
+  #sheet.open{transform:translateY(0);}
+  #sheet h2{font-size:26px; letter-spacing:.06em; margin-bottom:14px; color:#fff;}
+  .field{display:flex; align-items:center; gap:12px; margin:12px 0; flex-wrap:wrap;}
+  .field label{min-width:130px; color:#8f98b4;}
+  input[type=range]{flex:1; min-width:140px;}
+  input[type=text]{
+    background:#141827;border:1px solid #2a3049;color:#fff;
+    font-family:inherit;font-size:20px;padding:6px 10px;border-radius:6px;width:220px;
+  }
+  button{
+    font-family:inherit;font-size:20px;letter-spacing:.05em;
+    background:#1b2340;color:#fff;border:1px solid #34406b;
+    padding:8px 16px;border-radius:8px;
+  }
+  button:active{background:#2a3560;}
+  button.sel{background:#34549e;border-color:#5b7cd6;}
+  .btnrow{display:flex;gap:10px;margin-top:16px;flex-wrap:wrap;}
+  #radiusVal{color:#fff;min-width:70px;}
+  #diag{
+    margin-top:14px; padding:10px 12px; border:1px solid #23283a; border-radius:8px;
+    font-size:18px; line-height:1.5; color:#8f98b4; white-space:pre-line;
+  }
+  @media (prefers-reduced-motion: reduce){ #sheet{transition:none;} }
+</style>
+</head>
+<body>
+
+<div id="panel">
+  <div class="row-top">
+    <div id="logo">
+      <svg id="logoSvg" viewBox="0 0 13 13" shape-rendering="crispEdges" aria-hidden="true"></svg>
+    </div>
+    <div id="headlines">
+      <div class="h-line" id="line1">Overhead</div>
+      <div class="h-line" id="line2">·········</div>
+      <div class="h-line" id="line3">·········</div>
+    </div>
+  </div>
+  <div class="d-line" id="line4">Waiting for location…</div>
+  <div class="d-line" id="line5">Tap screen for settings</div>
+</div>
+
+<div id="ledmask"></div>
+<div id="sheen"></div>
+<div id="footer"></div>
+
+<div id="sheet">
+  <h2>SETTINGS</h2>
+  <div class="field">
+    <label>Search radius</label>
+    <input type="range" id="radius" min="5" max="100" step="5" value="30">
+    <span id="radiusVal">30 nm</span>
+  </div>
+  <div class="field">
+    <label>Location</label>
+    <input type="text" id="latlon" placeholder="lat, lon (optional)">
+    <button id="useGps">Use GPS</button>
+  </div>
+  <div class="field">
+    <label>LED density</label>
+    <button data-led="fine" class="ledBtn sel">Fine</button>
+    <button data-led="medium" class="ledBtn">Medium</button>
+    <button data-led="coarse" class="ledBtn">Coarse</button>
+    <button data-led="off" class="ledBtn">Off</button>
+  </div>
+  <div class="btnrow">
+    <button id="refreshBtn">Refresh now</button>
+    <button id="fsBtn">Fullscreen</button>
+    <button id="closeBtn">Close</button>
+  </div>
+  <div id="diag">No data yet.</div>
+</div>
+
+<script>
+"use strict";
+
+/* ================= config / state ================= */
+const state = {
+  lat:null, lon:null,
+  radius:30,            // nautical miles
+  aircraft:[],
+  shown:0,
+  routeCache:{},
+  airportCache:{},
+  diag:{},              // per-source status
+  paused:false
+};
+
+const $ = id => document.getElementById(id);
+const L = [null,$("line1"),$("line2"),$("line3"),$("line4"),$("line5")];
+
+/* persistent settings (guarded — degrades gracefully if storage is unavailable) */
+function saveSetting(k,v){ try{ localStorage.setItem("oh_"+k, JSON.stringify(v)); }catch(e){} }
+function loadSetting(k){ try{ const v=localStorage.getItem("oh_"+k); return v==null?null:JSON.parse(v); }catch(e){ return null; } }
+
+/* ================= airline names (ICAO callsign prefixes) ================= */
+const AIRLINES = {
+  UAL:"United", AAL:"American", DAL:"Delta", SWA:"Southwest", JBU:"JetBlue",
+  ASA:"Alaska", NKS:"Spirit", FFT:"Frontier", AAY:"Allegiant", SCX:"Sun Country",
+  HAL:"Hawaiian", SKW:"SkyWest", RPA:"Republic", EDV:"Endeavor", ENY:"Envoy",
+  JIA:"PSA", PDT:"Piedmont", AWI:"Air Wisconsin", QXE:"Horizon", GJS:"GoJet",
+  UPS:"UPS", FDX:"FedEx", GTI:"Atlas Air", CKS:"Kalitta", ABX:"ABX Air",
+  ATN:"Air Transport", AJT:"Amerijet", CLX:"Cargolux", BOX:"AeroLogic",
+  ACA:"Air Canada", WJA:"WestJet", JZA:"Jazz", POE:"Porter", ROU:"Air Canada Rouge",
+  BAW:"British Airways", VIR:"Virgin Atlantic", DLH:"Lufthansa", AFR:"Air France",
+  KLM:"KLM", IBE:"Iberia", EIN:"Aer Lingus", SAS:"SAS", SWR:"Swiss",
+  AUA:"Austrian", TAP:"TAP Portugal", ITY:"ITA Airways", FIN:"Finnair",
+  LOT:"LOT Polish", ICE:"Icelandair", RYR:"Ryanair", EZY:"easyJet", WZZ:"Wizz Air",
+  UAE:"Emirates", QTR:"Qatar", ETD:"Etihad", ELY:"El Al", THY:"Turkish",
+  ANA:"ANA", JAL:"Japan Airlines", KAL:"Korean Air", AAR:"Asiana",
+  CPA:"Cathay Pacific", SIA:"Singapore", EVA:"EVA Air", CAL:"China Airlines",
+  QFA:"Qantas", ANZ:"Air New Zealand", FJI:"Fiji Airways",
+  AMX:"Aeromexico", VOI:"Volaris", CMP:"Copa", AVA:"Avianca", LAN:"LATAM",
+  EJA:"NetJets", LXJ:"Flexjet", JTL:"Jet Linx", XOJ:"XOJet", VTE:"Vista",
+  DPJ:"Wheels Up", KAP:"Cape Air", MXY:"Breeze", VXP:"Avelo", JSX:"JSX"
+};
+
+/* ================= aircraft type names ================= */
+const TYPES = {
+  A19N:"A319neo", A20N:"A320neo", A21N:"A321neo",
+  A319:"A319", A320:"A320", A321:"A321",
+  A332:"A330-200", A333:"A330-300", A338:"A330-800", A339:"A330-900",
+  A343:"A340", A346:"A340-600", A359:"A350-900", A35K:"A350-1000",
+  A388:"A380", A306:"A300", A310:"A310",
+  B712:"717", B722:"727", B732:"737-200", B733:"737-300", B734:"737-400",
+  B735:"737-500", B736:"737-600", B737:"737-700", B738:"737-800", B739:"737-900",
+  B37M:"737 MAX 7", B38M:"737 MAX 8", B39M:"737 MAX 9", B3XM:"737 MAX 10",
+  B741:"747-100", B742:"747-200", B744:"747-400", B748:"747-8",
+  B752:"757-200", B753:"757-300", B762:"767-200", B763:"767-300", B764:"767-400",
+  B772:"777-200", B77L:"777-200LR", B773:"777-300", B77W:"777-300ER",
+  B788:"787-8", B789:"787-9", B78X:"787-10",
+  MD11:"MD-11", MD82:"MD-82", MD83:"MD-83", MD88:"MD-88", MD90:"MD-90",
+  E135:"ERJ-135", E145:"ERJ-145", E170:"E170", E75S:"E175", E75L:"E175",
+  E190:"E190", E195:"E195", E290:"E190-E2", E295:"E195-E2",
+  CRJ2:"CRJ-200", CRJ7:"CRJ-700", CRJ9:"CRJ-900", CRJX:"CRJ-1000",
+  DH8A:"Dash 8-100", DH8B:"Dash 8-200", DH8C:"Dash 8-300", DH8D:"Dash 8-Q400",
+  AT45:"ATR 42", AT72:"ATR 72", SF34:"Saab 340",
+  C172:"Cessna 172", C182:"Cessna 182", C208:"Caravan", C25A:"Citation CJ2",
+  C25B:"Citation CJ3", C56X:"Citation XLS", C680:"Citation Sovereign",
+  C68A:"Citation Latitude", C700:"Citation Longitude", C750:"Citation X",
+  E50P:"Phenom 100", E55P:"Phenom 300", E545:"Legacy 450", E550:"Legacy 500",
+  CL30:"Challenger 300", CL35:"Challenger 350", CL60:"Challenger 600",
+  GLF4:"Gulfstream IV", GLF5:"Gulfstream V", GLF6:"G650", GL7T:"Global 7500",
+  GLEX:"Global Express", LJ35:"Learjet 35", LJ45:"Learjet 45", LJ60:"Learjet 60",
+  PC12:"Pilatus PC-12", TBM9:"TBM 900", SR22:"Cirrus SR22", DA40:"Diamond DA40",
+  P28A:"Piper Cherokee", BE20:"King Air 200", BE35:"Bonanza", B350:"King Air 350",
+  H60:"Black Hawk", EC35:"EC135", A139:"AW139", R44:"Robinson R44",
+  K35R:"KC-135", C17:"C-17", C130:"C-130", B52:"B-52"
+};
+
+/* ================= airline brand colors + IATA codes ================= */
+const AIRLINE_STYLE = {
+  UAL:{c:"#2e6cff",iata:"UA"}, DAL:{c:"#ff2d40",iata:"DL"}, AAL:{c:"#ff3344",iata:"AA"},
+  SWA:{c:"#ffbf27",iata:"WN"}, JBU:{c:"#3f7fff",iata:"B6"}, ASA:{c:"#00b6f1",iata:"AS"},
+  NKS:{c:"#ffe600",iata:"NK"}, FFT:{c:"#17c964",iata:"F9"}, AAY:{c:"#f4a71d",iata:"G4"},
+  SCX:{c:"#ff8200",iata:"SY"}, HAL:{c:"#e14ca8",iata:"HA"}, SKW:{c:"#3aa0ff",iata:"OO"},
+  RPA:{c:"#3aa0ff",iata:"YX"}, EDV:{c:"#ff3344",iata:"9E"}, ENY:{c:"#3aa0ff",iata:"MQ"},
+  JIA:{c:"#3aa0ff",iata:"OH"}, PDT:{c:"#3aa0ff",iata:"PT"}, AWI:{c:"#3aa0ff",iata:"ZW"},
+  QXE:{c:"#00b6f1",iata:"QX"}, GJS:{c:"#3aa0ff",iata:"G7"},
+  UPS:{c:"#ffb500",iata:"5X"}, FDX:{c:"#8f6bff",iata:"FX"}, GTI:{c:"#f2c94c",iata:"5Y"},
+  ACA:{c:"#ff2d2d",iata:"AC"}, WJA:{c:"#19d3c5",iata:"WS"}, POE:{c:"#12b886",iata:"PD"},
+  JZA:{c:"#ff2d2d",iata:"QK"}, ROU:{c:"#ff2d2d",iata:"RV"},
+  BAW:{c:"#ff4b4b",iata:"BA"}, VIR:{c:"#ff2d55",iata:"VS"}, DLH:{c:"#ffcf3f",iata:"LH"},
+  AFR:{c:"#4f7dff",iata:"AF"}, KLM:{c:"#4fa8ff",iata:"KL"}, IBE:{c:"#ff5a36",iata:"IB"},
+  EIN:{c:"#17c964",iata:"EI"}, SAS:{c:"#4f7dff",iata:"SK"}, SWR:{c:"#ff4b4b",iata:"LX"},
+  AUA:{c:"#ff4b4b",iata:"OS"}, TAP:{c:"#17c964",iata:"TP"}, ITY:{c:"#4f7dff",iata:"AZ"},
+  FIN:{c:"#4fa8ff",iata:"AY"}, LOT:{c:"#4f7dff",iata:"LO"}, ICE:{c:"#ffcf3f",iata:"FI"},
+  RYR:{c:"#4f7dff",iata:"FR"}, EZY:{c:"#ff8200",iata:"U2"}, WZZ:{c:"#c56dd6",iata:"W6"},
+  UAE:{c:"#ff4b4b",iata:"EK"}, QTR:{c:"#c56dd6",iata:"QR"}, ETD:{c:"#d8b45a",iata:"EY"},
+  ELY:{c:"#4f7dff",iata:"LY"}, THY:{c:"#ff4b4b",iata:"TK"},
+  ANA:{c:"#4fa8ff",iata:"NH"}, JAL:{c:"#ff4b4b",iata:"JL"}, KAL:{c:"#7fd4ff",iata:"KE"},
+  AAR:{c:"#c56dd6",iata:"OZ"}, CPA:{c:"#17c9a4",iata:"CX"}, SIA:{c:"#ffcf3f",iata:"SQ"},
+  EVA:{c:"#17c964",iata:"BR"}, CAL:{c:"#e14ca8",iata:"CI"},
+  QFA:{c:"#ff4b4b",iata:"QF"}, ANZ:{c:"#4fa8ff",iata:"NZ"}, FJI:{c:"#19d3c5",iata:"FJ"},
+  AMX:{c:"#4f7dff",iata:"AM"}, VOI:{c:"#a05af0",iata:"Y4"}, CMP:{c:"#4f7dff",iata:"CM"},
+  AVA:{c:"#ff4b4b",iata:"AV"}, LAN:{c:"#ff5a8a",iata:"LA"},
+  MXY:{c:"#17c9d4",iata:"MX"}, VXP:{c:"#ff8f1f",iata:"XP"}, JSX:{c:"#ff3344",iata:"XE"},
+  KAP:{c:"#4fa8ff",iata:"9K"}
+};
+
+/* ================= regional/express carriers → mainline they're branded as ================= */
+/* Only mapped where the regional flies essentially exclusively for one mainline.
+   SkyWest (SKW) and Republic (RPA) fly for several majors depending on the route,
+   so their own branding is kept rather than guessing wrong. */
+const REGIONAL_PARENT = {
+  GJS:"UAL",  // GoJet — United Express
+  AWI:"UAL",  // Air Wisconsin — United Express
+  EDV:"DAL",  // Endeavor — Delta Connection
+  JIA:"AAL",  // PSA — American Eagle
+  ENY:"AAL",  // Envoy — American Eagle
+  PDT:"AAL",  // Piedmont — American Eagle
+  QXE:"ASA"   // Horizon — Alaska
+};
+function brandPrefix(cs){
+  if(!cs) return null;
+  const p = cs.trim().slice(0,3).toUpperCase();
+  return REGIONAL_PARENT[p] || p;
+}
+
+/* ================= custom pixel-art logos (13x13 grids) ================= */
+const LOGOS = {
+  UAL:{ p:{U:"#2e6cff"}, g:[   // globe with lattice
+    ".....UUU.....",
+    "..UU.UUU.UU..",
+    ".UUU.UUU.UUU.",
+    ".UUU.UUU.UUU.",
+    ".............",
+    "UUUU.UUU.UUUU",
+    "UUUU.UUU.UUUU",
+    "UUUU.UUU.UUUU",
+    ".............",
+    ".UUU.UUU.UUU.",
+    ".UUU.UUU.UUU.",
+    "..UU.UUU.UU..",
+    ".....UUU....."]},
+  DAL:{ p:{R:"#ff2d40",D:"#b3132d"}, g:[   // widget triangle, split
+    "......R......",
+    ".....RRD.....",
+    ".....RRD.....",
+    "....RRRDD....",
+    "....RRRDD....",
+    "...RRRRDDD...",
+    "...RRRRDDD...",
+    "..RRRRRDDDD..",
+    "..RRRRRDDDD..",
+    ".RRRRRRDDDDD.",
+    ".RRRRRRDDDDD.",
+    "RRRRRRRDDDDDD",
+    "............."]},
+  SWA:{ p:{R:"#ff4438",O:"#ff9421",Y:"#ffcf3f"}, g:[   // striped heart
+    "..RRR...RRR..",
+    ".RRRRR.RRRRR.",
+    "RRRRRRRRRRRRR",
+    "RRRRRRRRRRRRR",
+    "OOOOOOOOOOOOO",
+    "OOOOOOOOOOOOO",
+    ".OOOOOOOOOOO.",
+    "..YYYYYYYYY..",
+    "...YYYYYYY...",
+    "....YYYYY....",
+    ".....YYY.....",
+    "......Y......",
+    "............."]},
+  UPS:{ p:{G:"#ffb500",B:"#8a5a2b"}, g:[   // shield
+    "GGGGGGGGGGGGG",
+    "GBBBBBBBBBBBG",
+    "GBBBBBBBBBBBG",
+    "GBBBBBBBBBBBG",
+    "GBBBBBBBBBBBG",
+    ".GBBBBBBBBBG.",
+    ".GBBBBBBBBBG.",
+    "..GBBBBBBBG..",
+    "..GBBBBBBBG..",
+    "...GBBBBBG...",
+    "....GBBBG....",
+    ".....GBG.....",
+    "......G......"]},
+  ACA:{ p:{R:"#ff2d2d"}, g:[   // maple leaf
+    "......R......",
+    "......R......",
+    "..R...R...R..",
+    "..RR.RRR.RR..",
+    "...RRRRRRR...",
+    ".RRRRRRRRRRR.",
+    "RRRRRRRRRRRRR",
+    "...RRRRRRR...",
+    "....RRRRR....",
+    ".....RRR.....",
+    "......R......",
+    "......R......",
+    "............."]},
+  AAL:{ letters:"AA", colors:["#ff3344","#3aa0ff"] },   // red/blue double-A
+  FDX:{ letters:"FX", colors:["#8f6bff","#ff8f1f"] }    // purple/orange
+};
+
+/* ================= 5x7 LED pixel font (A–Z, 0–9) for monograms ================= */
+const FONT = {
+  A:[0x0E,0x11,0x11,0x1F,0x11,0x11,0x11], B:[0x1E,0x11,0x11,0x1E,0x11,0x11,0x1E],
+  C:[0x0E,0x11,0x10,0x10,0x10,0x11,0x0E], D:[0x1E,0x11,0x11,0x11,0x11,0x11,0x1E],
+  E:[0x1F,0x10,0x10,0x1E,0x10,0x10,0x1F], F:[0x1F,0x10,0x10,0x1E,0x10,0x10,0x10],
+  G:[0x0E,0x11,0x10,0x17,0x11,0x11,0x0E], H:[0x11,0x11,0x11,0x1F,0x11,0x11,0x11],
+  I:[0x0E,0x04,0x04,0x04,0x04,0x04,0x0E], J:[0x07,0x02,0x02,0x02,0x02,0x12,0x0C],
+  K:[0x11,0x12,0x14,0x18,0x14,0x12,0x11], L:[0x10,0x10,0x10,0x10,0x10,0x10,0x1F],
+  M:[0x11,0x1B,0x15,0x15,0x11,0x11,0x11], N:[0x11,0x19,0x15,0x13,0x11,0x11,0x11],
+  O:[0x0E,0x11,0x11,0x11,0x11,0x11,0x0E], P:[0x1E,0x11,0x11,0x1E,0x10,0x10,0x10],
+  Q:[0x0E,0x11,0x11,0x11,0x15,0x12,0x0D], R:[0x1E,0x11,0x11,0x1E,0x14,0x12,0x11],
+  S:[0x0F,0x10,0x10,0x0E,0x01,0x01,0x1E], T:[0x1F,0x04,0x04,0x04,0x04,0x04,0x04],
+  U:[0x11,0x11,0x11,0x11,0x11,0x11,0x0E], V:[0x11,0x11,0x11,0x11,0x11,0x0A,0x04],
+  W:[0x11,0x11,0x11,0x15,0x15,0x1B,0x11], X:[0x11,0x11,0x0A,0x04,0x0A,0x11,0x11],
+  Y:[0x11,0x11,0x0A,0x04,0x04,0x04,0x04], Z:[0x1F,0x01,0x02,0x04,0x08,0x10,0x1F],
+  "0":[0x0E,0x11,0x13,0x15,0x19,0x11,0x0E], "1":[0x04,0x0C,0x04,0x04,0x04,0x04,0x0E],
+  "2":[0x0E,0x11,0x01,0x06,0x08,0x10,0x1F], "3":[0x1F,0x02,0x04,0x02,0x01,0x11,0x0E],
+  "4":[0x02,0x06,0x0A,0x12,0x1F,0x02,0x02], "5":[0x1F,0x10,0x1E,0x01,0x01,0x11,0x0E],
+  "6":[0x06,0x08,0x10,0x1E,0x11,0x11,0x0E], "7":[0x1F,0x01,0x02,0x04,0x08,0x08,0x08],
+  "8":[0x0E,0x11,0x11,0x0E,0x11,0x11,0x0E], "9":[0x0E,0x11,0x11,0x0F,0x01,0x02,0x0C]
+};
+
+/* default pixel airplane (used when no airline match / scanning) */
+const PLANE_GRID = { p:{B:"#2e6cff"}, g:[
+  "......B......",
+  "......B......",
+  ".....BBB.....",
+  ".....BBB.....",
+  "....BBBBB....",
+  "..BBBBBBBBB..",
+  "BBBBBBBBBBBBB",
+  "BBBBBBBBBBBBB",
+  ".....BBB.....",
+  ".....BBB.....",
+  "....BBBBB....",
+  "...BBBBBBB...",
+  ".....BBB....."]};
+
+/* ================= logo renderer ================= */
+function rectsFromGrid(def){
+  const out=[];
+  def.g.forEach((row,y)=>{
+    for(let x=0;x<row.length;x++){
+      const ch=row[x];
+      if(ch!=="." && def.p[ch]) out.push({x,y,c:def.p[ch]});
+    }
+  });
+  return out;
+}
+function rectsFromLetters(letters, colors){
+  const out=[];
+  const chars=(letters||"").toUpperCase().slice(0,2).split("");
+  chars.forEach((ch,i)=>{
+    const glyph=FONT[ch]; if(!glyph) return;
+    const x0 = 1 + i*6, y0 = 3, c = colors[i] || colors[0];
+    glyph.forEach((bits,ry)=>{
+      for(let b=0;b<5;b++) if(bits & (0x10>>b)) out.push({x:x0+b, y:y0+ry, c});
+    });
+  });
+  return out;
+}
+let lastLogoKey=null;
+function renderLogo(cs){
+  const prefix = brandPrefix(cs) || "";
+  const key = prefix || "__plane__";
+  if(key===lastLogoKey) return;
+  lastLogoKey=key;
+  const custom = LOGOS[prefix];
+  const style  = AIRLINE_STYLE[prefix];
+  let rects;
+  if(custom && custom.g){
+    rects = rectsFromGrid(custom);
+  } else if(custom && custom.letters){
+    rects = rectsFromLetters(custom.letters, custom.colors);
+  } else if(style && style.iata){
+    rects = rectsFromLetters(style.iata, [style.c, style.c]);
+  } else if(cs){
+    rects = rectsFromLetters(cs.trim().slice(0,2), ["#2e6cff","#2e6cff"]);
+  } else {
+    rects = rectsFromGrid(PLANE_GRID);
+  }
+  const glow = rects.length && rects[0].c;
+  $("logoSvg").innerHTML = rects.map(r=>
+    `<rect x="${r.x}" y="${r.y}" width="1" height="1" fill="${r.c}"/>`).join("");
+  $("logo").style.filter = `drop-shadow(0 0 1vmin ${glow||"#2e6cff"}44)`;
+}
+
+/* ================= helpers ================= */
+function airlineName(cs){
+  if(!cs) return null;
+  const p = brandPrefix(cs);
+  return AIRLINES[p] || null;
+}
+function typeName(t){
+  if(!t) return null;
+  return TYPES[t.toUpperCase()] || t.toUpperCase();
+}
+function fmtAlt(ft){
+  if(ft==="ground") return "GND";
+  if(ft==null) return "--";
+  if(ft < 1000) return ft+"";
+  return (ft/1000).toFixed(1).replace(/\.0$/,"")+"k";
+}
+function setLine(i, txt, cls){
+  const el = L[i];
+  el.textContent = txt;
+  el.classList.toggle("status", cls==="status");
+}
+function nmBetween(lat1,lon1,lat2,lon2){
+  const R=3440.065, toR=Math.PI/180;
+  const dLat=(lat2-lat1)*toR, dLon=(lon2-lon1)*toR;
+  const a=Math.sin(dLat/2)**2+Math.cos(lat1*toR)*Math.cos(lat2*toR)*Math.sin(dLon/2)**2;
+  return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+}
+
+/* ================= data fetch ================= */
+async function fetchJSON(url, ms=8000){
+  const c = new AbortController();
+  const t = setTimeout(()=>c.abort(), ms);
+  try{
+    const r = await fetch(url, {signal:c.signal});
+    if(!r.ok) throw new Error("HTTP "+r.status);
+    return await r.json();
+  } finally { clearTimeout(t); }
+}
+async function postJSON(url, body, ms=8000){
+  const c = new AbortController();
+  const t = setTimeout(()=>c.abort(), ms);
+  try{
+    const r = await fetch(url, {
+      method:"POST",
+      signal:c.signal,
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify(body)
+    });
+    if(!r.ok) throw new Error("HTTP "+r.status);
+    return await r.json();
+  } finally { clearTimeout(t); }
+}
+
+const SOURCES = [
+  { name:"adsb.lol",
+    url:(la,lo,r)=>`https://api.adsb.lol/v2/point/${la}/${lo}/${r}` },
+  { name:"airplanes.live",
+    url:(la,lo,r)=>`https://api.airplanes.live/v2/point/${la}/${lo}/${r}` },
+  { name:"adsb.fi",
+    url:(la,lo,r)=>`https://opendata.adsb.fi/api/v2/lat/${la}/lon/${lo}/dist/${r}` }
+];
+
+async function fetchAircraft(){
+  if(state.lat==null) return;
+  const {lat, lon, radius} = state;
+
+  const results = await Promise.allSettled(
+    SOURCES.map(s => fetchJSON(s.url(lat,lon,radius)))
+  );
+
+  const byHex = {};
+  results.forEach((res,i)=>{
+    const name = SOURCES[i].name;
+    if(res.status==="fulfilled"){
+      const list = res.value && (res.value.ac || res.value.aircraft) || [];
+      state.diag[name] = `OK — ${list.length} aircraft`;
+      for(const a of list){
+        if(!a.hex) continue;
+        if(!byHex[a.hex]) byHex[a.hex]=a;
+      }
+    } else {
+      state.diag[name] = "FAILED — " + (res.reason && res.reason.message || res.reason);
+    }
+  });
+
+  const ac = Object.values(byHex)
+    .filter(a => a.alt_baro !== "ground")
+    .map(a => {
+      if(a.dst==null && a.lat!=null && a.lon!=null)
+        a.dst = nmBetween(lat,lon,a.lat,a.lon);
+      return a;
+    })
+    .sort((a,b) => (a.dst??999)-(b.dst??999));
+
+  // keep showing the same aircraft across refreshes if it's still in range
+  const curHex = state.aircraft[state.shown] && state.aircraft[state.shown].hex;
+  state.aircraft = ac;
+  const keep = curHex ? ac.findIndex(x=>x.hex===curHex) : -1;
+  state.shown = keep >= 0 ? keep : 0;
+  updateDiag();
+}
+
+function updateDiag(){
+  const lines = [];
+  lines.push(`Position: ${state.lat!=null ? state.lat+", "+state.lon : "not set"}`);
+  lines.push(`Radius: ${state.radius} nm (${Math.round(state.radius*1.15)} mi)`);
+  for(const [k,v] of Object.entries(state.diag)) lines.push(`${k}: ${v}`);
+  lines.push(`Merged: ${state.aircraft.length} airborne`);
+  $("diag").textContent = lines.join("\n");
+}
+
+/* route lookup — position-aware first, so a stale/ambiguous callsign→route
+   mapping can't hand back the wrong day's routing or a merged round trip.
+   Falls back to the older flat lookup only if that fails entirely. */
+async function getRoute(cs, lat, lon){
+  const key = cs.trim();
+  if(key in state.routeCache) return state.routeCache[key];
+  state.routeCache[key] = null;
+
+  // primary: adsb.lol's routeset — matches the callsign's known schedules
+  // against the aircraft's actual current position to pick the plausible one
+  try{
+    const body = { planes:[{ callsign:key, lat: lat ?? 0, lng: lon ?? 0 }] };
+    const r = await postJSON("https://api.adsb.lol/api/0/routeset", body, 7000);
+    const entry = Array.isArray(r) ? (r.find(e=>e && e.plausible) || r[0]) : null;
+    let codes = entry && (entry._airport_codes_iata || entry.airport_codes_iata);
+    if(!codes && entry && Array.isArray(entry._airports) && entry._airports.length>=2){
+      codes = entry._airports.map(ap=>ap.iata || ap.icao).join("-");
+    }
+    if(codes && codes.includes("-")){
+      const legs = codes.split("-").filter(Boolean);
+      if(legs.length>=2) state.routeCache[key] = `${legs[0]}-${legs[legs.length-1]}`;
+    }
+  }catch(e){}
+
+  // fallback: flat hexdb table, only used if the above found nothing
+  if(!state.routeCache[key]){
+    try{
+      const r = await fetchJSON(`https://hexdb.io/api/v1/route/icao/${key}`, 6000);
+      if(r && r.route && r.route.includes("-")){
+        const legs = r.route.split("-").filter(Boolean);
+        const iata = await Promise.all(legs.map(icaoToIata));
+        if(iata.length>=2) state.routeCache[key] = `${iata[0]}-${iata[iata.length-1]}`;
+      }
+    }catch(e){}
+  }
+  return state.routeCache[key];
+}
+async function icaoToIata(icao){
+  if(state.airportCache[icao]) return state.airportCache[icao];
+  try{
+    const a = await fetchJSON(`https://hexdb.io/api/v1/airport/icao/${icao}`, 6000);
+    if(a && a.iata){ state.airportCache[icao]=a.iata; return a.iata; }
+  }catch(e){}
+  state.airportCache[icao]=icao;
+  return icao;
+}
+
+/* ================= render ================= */
+function flightNumber(cs){
+  if(!cs) return null;
+  const m = cs.match(/^([A-Z]{3})(\d.*)$/);
+  const style = m && AIRLINE_STYLE[m[1]];
+  return (m && style && style.iata) ? style.iata + m[2] : cs;
+}
+function render(){
+  const ac = state.aircraft;
+  if(state.lat==null){
+    renderLogo(null);
+    setLine(1,"Overhead");
+    setLine(4,"Waiting for location…","status");
+    setLine(5,"Tap screen for settings","status");
+    return;
+  }
+  if(!ac.length){
+    renderLogo(null);
+    setLine(1,"Scanning");
+    setLine(2,"·········");
+    setLine(3,"·········");
+    setLine(4,`No traffic within ${state.radius}nm`,"status");
+    setLine(5,new Date().toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"}),"status");
+    $("footer").textContent = `${state.lat}, ${state.lon}`;
+    return;
+  }
+  const a = ac[state.shown % ac.length];
+  const cs = (a.flight||"").trim();
+  const fno = flightNumber(cs) || a.r || (a.hex||"").toUpperCase();
+
+  renderLogo(cs);
+
+  // Line 1: airline  |  Line 2: flight number + route  |  Line 3: aircraft type
+  setLine(1, airlineName(cs) || cs || a.r || (a.hex||"").toUpperCase());
+  setLine(2, `${fno} ···-···`);
+  if(cs){
+    getRoute(cs, a.lat, a.lon).then(rt=>{
+      const cur = state.aircraft[state.shown % state.aircraft.length];
+      if(cur && (cur.flight||"").trim()===cs)
+        setLine(2, `${fno} ${rt || "----"}`);
+    });
+  } else {
+    setLine(2, fno);
+  }
+  setLine(3, typeName(a.t) || "Unknown");
+
+  const alt  = fmtAlt(a.alt_baro!=null ? a.alt_baro : a.alt_geom);
+  const mph  = a.gs!=null ? Math.round(a.gs*1.15078) : "--";
+  const trk  = a.track!=null ? Math.round(a.track) : "--";
+  const vrRaw = a.baro_rate!=null ? a.baro_rate : a.geom_rate;
+  const vr   = vrRaw!=null ? Math.round(vrRaw/60) : 0;
+  setLine(4, `Alt:${alt}ft,Spd:${mph}mph`);
+  setLine(5, `Trk:${trk}deg,Vr:${vr>0?"+":""}${vr}ft/s`);
+
+  const dst = a.dst!=null ? a.dst.toFixed(1)+"nm away" : "";
+  $("footer").textContent = `${(state.shown % ac.length)+1}/${ac.length}  ${cs || (a.hex||"").toUpperCase()}  ${dst}`;
+}
+
+/* ================= loops ================= */
+setInterval(async ()=>{ if(!state.paused){ await fetchAircraft(); render(); } }, 15000);
+setInterval(()=>{
+  if(state.aircraft.length>1 && !state.paused){
+    state.shown = (state.shown+1) % state.aircraft.length;
+    render();
+  }
+}, 8000);
+
+/* ================= location ================= */
+function useGPS(){
+  if(!navigator.geolocation){ setLine(4,"No GPS — enter lat,lon","status"); return; }
+  setLine(4,"Acquiring GPS…","status");
+  navigator.geolocation.getCurrentPosition(async pos=>{
+    state.lat = +pos.coords.latitude.toFixed(4);
+    state.lon = +pos.coords.longitude.toFixed(4);
+    saveSetting("lat", state.lat); saveSetting("lon", state.lon);
+    $("latlon").value = `${state.lat}, ${state.lon}`;
+    await fetchAircraft(); render();
+  }, err=>{
+    // Browsers block geolocation for pages opened as local files (file://) —
+    // it only works over https. Saved coordinates cover this case.
+    if(state.lat!=null) return; // already running on saved coords, stay quiet
+    const local = location.protocol === "file:";
+    setLine(4, local ? "GPS blocked for local files" : "Location unavailable ("+err.code+")","status");
+    setLine(5,"Enter lat,lon once — it's remembered","status");
+    updateDiag();
+  }, {enableHighAccuracy:false, timeout:10000, maximumAge:600000});
+}
+
+/* ================= settings UI ================= */
+const sheet = $("sheet");
+$("panel").addEventListener("click", ()=>{ updateDiag(); sheet.classList.add("open"); });
+$("closeBtn").addEventListener("click", e=>{ e.stopPropagation(); sheet.classList.remove("open"); });
+$("useGps").addEventListener("click", e=>{ e.stopPropagation(); useGPS(); });
+$("refreshBtn").addEventListener("click", async e=>{
+  e.stopPropagation();
+  await fetchAircraft(); render(); updateDiag();
+});
+$("radius").addEventListener("input", async e=>{
+  state.radius = +e.target.value;
+  $("radiusVal").textContent = state.radius+" nm";
+});
+$("radius").addEventListener("change", async ()=>{
+  saveSetting("radius", state.radius);
+  await fetchAircraft(); render();
+});
+$("latlon").addEventListener("change", async e=>{
+  const m = e.target.value.match(/(-?\d+(\.\d+)?)[,\s]+(-?\d+(\.\d+)?)/);
+  if(m){
+    state.lat=+m[1]; state.lon=+m[3];
+    saveSetting("lat", state.lat); saveSetting("lon", state.lon);
+    await fetchAircraft(); render();
+  }
+});
+$("fsBtn").addEventListener("click", e=>{
+  e.stopPropagation();
+  if(!document.fullscreenElement) document.documentElement.requestFullscreen().catch(()=>{});
+  else document.exitFullscreen();
+});
+/* LED density buttons */
+const LED = {
+  fine:   ["3.5px","1.35px"],
+  medium: ["5px","1.9px"],
+  coarse: ["7px","2.6px"],
+  off:    null
+};
+document.querySelectorAll(".ledBtn").forEach(b=>{
+  b.addEventListener("click", e=>{
+    e.stopPropagation();
+    document.querySelectorAll(".ledBtn").forEach(x=>x.classList.remove("sel"));
+    b.classList.add("sel");
+    const v = LED[b.dataset.led];
+    document.body.classList.toggle("led-off", !v);
+    if(v){
+      document.documentElement.style.setProperty("--dot-pitch", v[0]);
+      document.documentElement.style.setProperty("--dot-hole", v[1]);
+    }
+  });
+});
+
+/* keep tablet screen awake */
+let wakeLock=null;
+async function keepAwake(){
+  try{ if("wakeLock" in navigator) wakeLock = await navigator.wakeLock.request("screen"); }catch(e){}
+}
+document.addEventListener("visibilitychange", ()=>{ if(document.visibilityState==="visible") keepAwake(); });
+
+/* ================= boot ================= */
+keepAwake();
+const savedLat = loadSetting("lat"), savedLon = loadSetting("lon"), savedR = loadSetting("radius");
+if(savedR){ state.radius = savedR; $("radius").value = savedR; $("radiusVal").textContent = savedR+" nm"; }
+if(savedLat!=null && savedLon!=null){
+  state.lat = savedLat; state.lon = savedLon;
+  $("latlon").value = `${savedLat}, ${savedLon}`;
+  fetchAircraft().then(render);
+}
+useGPS();   // will silently refine the saved position if the browser allows it
+render();
+</script>
+</body>
+</html>
